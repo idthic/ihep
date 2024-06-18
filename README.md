@@ -1,9 +1,11 @@
-# paper archive (TBD)
+# ihep
+
+A small CLI tool to download PDF files of papers.
 
 ```bash
 # using arXiv number
-./download.sh 1904.11217
+ihep download 1904.11217
 
 # using TeX key (inspirehep)
-./download.sh Murase:2019cwc
+ihep download Murase:2019cwc
 ```

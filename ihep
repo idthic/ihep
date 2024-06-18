@@ -1,9 +1,9 @@
 #!/bin/bash
 
 # 2024-06-18
-_arx_user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
-_arx_archive=./archive
-_arx_base_run=./tmp
+_ihep_user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
+_ihep_archive=./archive
+_ihep_base_run=./tmp
 
 function string#match { [[ $1 =~ $2 ]]; }
 
@@ -21,25 +21,31 @@ function mkfd {
 function dl {
   local url=$1 dst=$2
   local referer=
-  if [[ $_arx_cookies ]]; then
-    mkfd "$_arx_cookies"
-    >> "$_arx_cookies"
+  if [[ $_ihep_cookies ]]; then
+    mkfd "$_ihep_cookies"
+    >> "$_ihep_cookies"
   fi
   wget \
     --no-verbose --show-progress \
-    --user-agent="$_arx_user_agent" ${referer:+--referer="$REFERER"} \
-    ${_arx_cookies:+--load-cookies "$_arx_cookies" --save-cookies "$_arx_cookies" --keep-session-cookies} \
+    --user-agent="$_ihep_user_agent" ${referer:+--referer="$REFERER"} \
+    ${_ihep_cookies:+--load-cookies "$_ihep_cookies" --save-cookies "$_ihep_cookies" --keep-session-cookies} \
     -4 --retry-on-http-error=522,524 -t 5 \
     "$url" -O "$dst.part" &&
     mv "$dst.part" "$dst"
 }
 
+function open {
+  if [[ $OSTYPE == cygwin ]]; then
+    cygstart "$1"
+  fi
+}
+
 function dl-inspirehep {
-  local _arx_cookies=$_arx_base_run/inspirehep.cookies.txt
+  local _ihep_cookies=$_ihep_base_run/inspirehep.cookies.txt
   dl "$@"
 }
 
-function main {
+function ihep/download/search-and-download {
   local search_url=
   if string#match "$1" '^(ar[Xx]iv:)?([0-9]{4}\.[0-9]{4,5})$'; then
     # arXiv
@@ -53,7 +59,7 @@ function main {
     return 2
   fi
   
-  local tmp1=$_arx_base_run/search.json
+  local tmp1=$_ihep_base_run/search.json
   mkfd "$tmp1"
   dl-inspirehep "$search_url" "$tmp1"
 
@@ -70,10 +76,10 @@ function main {
     printf '%s\n' 'failed to determine the key' >&2
     return 1
   fi
-  local filename=$_arx_archive/${key//:}.pdf
+  local filename=$_ihep_archive/${key//:}.pdf
   if [[ -s $filename ]]; then
     # file already exists
-    printf '%s\n' "$filename"
+    REPLY=$filename
     return 0
   fi
 
@@ -81,13 +87,41 @@ function main {
     printf '%s\n' 'failed to determine the full text URL' >&2
     return 1
   fi
-  mkd "$_arx_archive"
+  mkd "$_ihep_archive"
   if ! dl "$url" "$filename"; then
     printf '%s\n' 'failed to download the file.' >&2
     printf '%s\n' "url=$url" >&2
     return 1
   fi
-  printf '%s\n' "$filename"
+  REPLY=$filename
+  return 0
+}
+
+function ihep/sub:download {
+  local REPLY
+  if ihep/download/search-and-download "$@"; then
+    printf '%s\n' "$REPLY"
+  fi
+}
+
+function ihep/sub:open {
+  local REPLY
+  if ihep/download/search-and-download "$@"; then
+    open "$REPLY"
+  fi
+}
+
+function main {
+  if declare -F "ihep/sub:$1" &>/dev/null; then
+    "ihep/sub:$@"
+  else
+    if (($#)); then
+      printf '%s\n' "ihep: unrecognized subcommand '$1'" >&2
+    else
+      printf 'usage: ihep <subcommand> <args>...\n'
+    fi
+    return 2
+  fi
 }
 
 main "$@"
