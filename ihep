@@ -6,14 +6,151 @@ if ((_ihep_bash < 30000)); then
   exit 1
 fi
 
+#------------------------------------------------------------------------------
+# ihep/util/readlink
+
+## The implementation is taken from "ble/util/readlink" from ble.sh
+## <https://github.com/akinomyoga/ble.sh>.
+
+function ihep/util/print { printf '%s\n' "$1"; }
+
+if ((_ihep_bash >= 40000)); then
+  _ihep_util_readlink_visited_init='local -A visited=()'
+  function ihep/util/readlink/.visited {
+    [[ ${visited[$1]+set} ]] && return 0
+    visited[$1]=1
+    return 1
+  }
+else
+  _ihep_util_readlink_visited_init="local -a visited=()"
+  function ihep/util/readlink/.visited {
+    local key
+    for key in "${visited[@]}"; do
+      [[ $1 == "$key" ]] && return 0
+    done
+    visited=("$1" "${visited[@]}")
+    return 1
+  }
+fi
+
+## @fn ihep/util/readlink/.readlink path
+##   @var[out] link
+function ihep/util/readlink/.readlink {
+  local path=$1
+  if declare -F readlink &>/dev/null; then
+    link=$(readlink -- "$path")
+    [[ $link ]]
+  elif ihep/bin#has ls; then
+    link=$(ls -ld -- "$path") &&
+      [[ $link == *" $path -> "?* ]] &&
+      link=${link#*" $path -> "}
+  else
+    false
+  fi
+} 2>/dev/null
+
+## @fn  ihep/util/readlink/.resolve_physical_directory
+##   @var[in,out] path
+function ihep/util/readlink/.resolve_physical_directory {
+  [[ $path == */?* ]] || return 0
+  local PWD=$PWD OLDPWD=$OLDPWD CDPATH=
+  builtin cd -L . &&
+    local pwd=$PWD &&
+    builtin cd -P "${path%/*}/" &&
+    path=${PWD%/}/${path##*/}
+  builtin cd -L "$pwd"
+  return 0
+}
+
+function ihep/util/readlink/.resolve_loop {
+  local path=$1
+  builtin eval -- "$_ihep_util_readlink_visited_init"
+  while [[ -h $path ]]; do
+    local link
+    ihep/util/readlink/.visited "$path" && break
+    ihep/util/readlink/.readlink "$path" || break
+    if [[ $link == /* || $path != */* ]]; then
+      path=$link
+    else
+      ihep/util/readlink/.resolve_physical_directory
+      path=${path%/}/$link
+    fi
+    while [[ $path == ?*/ ]]; do path=${path%/}; done
+  done
+  ihep/util/print "$path"
+}
+
+function ihep/util/readlink/.resolve {
+  # Select implementation on the first call
+  _ihep_util_readlink_type=
+
+  case $OSTYPE in
+  (cygwin | msys | linux-gnu)
+    # These systems provide "readlink -f".
+    local readlink
+    readlink=$(type -P readlink)
+    case $readlink in
+    (/bin/readlink | /usr/bin/readlink)
+      # shellcheck disable=SC2100
+      _ihep_util_readlink_type=readlink-f
+      function ihep/util/readlink/.resolve { readlink -f -- "$1"; } ;;
+    esac ;;
+  esac
+
+  if [[ ! $_ihep_util_readlink_type ]]; then
+    _ihep_util_readlink_type=loop
+    function ihep/util/readlink/.resolve { ihep/util/readlink/.resolve_loop "$1"; }
+  fi
+
+  ihep/util/readlink/.resolve "$1"
+}
+
+function ihep/util/readlink {
+  if [[ -h $1 ]]; then
+    ihep/util/readlink/.resolve "$1"
+  else
+    ihep/util/print "$1"
+  fi
+}
+
+#------------------------------------------------------------------------------
+
+function ihep/base/initialize {
+  unset -f "$FUNCNAME"
+
+  # _ihep_base
+  local bin_path=$(ihep/util/readlink "$BASH_SOURCE")
+  if [[ $bin_path != /* ]]; then
+    bin_path=$PWD/${bin_path#./}
+  fi
+  _ihep_base=${bin_path%/*}
+  [[ $_ihep_base ]] || _ihep_base=/
+
+  # other directories
+  _ihep_base_data=~/.local/share/ihep
+  _ihep_base_state=~/.local/state/ihep
+  _ihep_base_run=$_ihep_base/tmp
+}
+ihep/base/initialize
+
+function ihep/sub:install {
+  local src=$_ihep_base/ihep
+  local dst=~/.local/bin/ihep
+  if [[ $BASH_SOURCE == "$dst" || $src == "$dst" ]]; then
+    # it is already installed
+    return 0
+  fi
+
+  [[ -x $src ]] &&
+    mkfd "$dst" &&
+    ln -sf "$src" "$dst"
+}
+
 # 2024-06-18
 _ihep_user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
 
-_ihep_base_data=~/.local/share/ihep
-_ihep_base_state=~/.local/state/ihep
-_ihep_base_run=./tmp
 
-function print { printf '%s\n' "$1"; }
+function print { ihep/util/print "$@"; }
 function string#match { [[ $1 =~ $2 ]]; }
 function string#split {
   local IFS=$2 _txt=$3
@@ -253,7 +390,7 @@ function ihep/metadata/load/.fetch {
   dl-inspirehep "$search_url" "$tmp1"
 
   local metadata
-  if ! metadata=$(node inspirehep-extract-metadata.js "$tmp1"); then
+  if ! metadata=$(node "$_ihep_base/inspirehep-extract-metadata.js" "$tmp1"); then
     print "ihep: failed to call inspirehep-extract-metadata" >&2
     return 1
   fi
