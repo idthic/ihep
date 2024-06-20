@@ -1,5 +1,11 @@
 #!/bin/bash
 
+_ihep_bash=$((BASH_VERSINFO[0]*10000+BASH_VERSINFO[1]*100+BASH_VERSINFO[2]))
+if ((_ihep_bash < 30000)); then
+  printf '%s\n' "ihep: unsupported Bash version: $BASH_VERSION" >&2
+  exit 1
+fi
+
 # 2024-06-18
 _ihep_user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
 
@@ -16,12 +22,23 @@ function string#split {
   set +f
   return 0
 }
-function array#push { builtin eval "$1+=(\"\${@:2}\")"; }
+if ((_ihep_bash>=30100)); then
+  function array#push {
+    (($# >= 2)) || return 0
+    builtin eval "$1+=(\"\${@:2}\")"
+  }
+else
+  function array#push {
+    (($# >= 2)) || return 0
+    builtin eval "$1=(\"\${$1[@]}\" \"\${@:2}\")"
+  }
+fi
 function ihep/bin#has { type -t -- "$1" &>/dev/null; }
 
 function ihep/base/check-environment {
   unset -f "$FUNCNAME"
   local flags=
+
   if ! ihep/bin#has node; then
     print 'ihep: The command "node" (Node.js) is not found.' >&2
     flags=E$flags
@@ -35,6 +52,9 @@ function ihep/base/check-environment {
   [[ $flags != *E* ]]
 }
 ihep/base/check-environment || exit 1
+
+#------------------------------------------------------------------------------
+# utilities
 
 function mkd {
   if [[ $1 && ! -d $1 ]]; then
@@ -63,6 +83,14 @@ function dl {
     mv "$dst.part" "$dst"
 }
 
+function ihep/util/date {
+  if ((_ihep_bash>=40200)); then
+    printf -v REPLY '%(%F)T' -1
+  else
+    REPLY=(date +%F)
+  fi
+}
+
 function ihep/util/open {
   local file=$1
   case $file in
@@ -86,6 +114,16 @@ function ihep/util/open {
   else
     print "ihep: no resolver for '$file' found." >&2
     print "$file"
+  fi
+}
+
+function ihep/util/fold {
+  if ihep/bin#has ifold; then
+    ifold -s -w 79 --no-text-justify
+  elif ihep/bin#has fold; then
+    fold -sw 79
+  else
+    cat
   fi
 }
 
@@ -255,31 +293,159 @@ function ihep/metadata/load {
   ihep/metadata/load/.fetch "$type" "$value"
 }
 
+function ihep/metadata/print-markdown/.escape {
+  local _var _val
+  for _var; do
+    _val=${!_var}
+    [[ $_val == *['<>&\_']* ]] || continue
+    _val=${_val//'_'/'\_'}
+    _val=${_val//'\'/'\\'}
+    _val=${_val//'&'/'&amp;'}
+    _val=${_val//'<'/'&lt;'}
+    _val=${_val//'>'/'&gt;'}
+    printf -v "$_var" %s "$_val"
+  done
+}
+
+function ihep/metadata/print-abstract {
+  local REPLY
+  ihep/metadata/load "$1" || return 1
+
+  local texkey=${REPLY[0]}
+  local inspire=${REPLY[1]}
+  local arxiv=${REPLY[2]}
+  local url=${REPLY[3]}
+  local title=${REPLY[4]}
+  local authors=${REPLY[5]}
+  local abstract=${REPLY[6]}
+
+  ihep/metadata/print-markdown/.escape texkey inspire arxiv title authors abstract
+  abstract=$(ihep/util/fold <<< "$abstract")
+
+  [[ $inspire ]] && texkey="[$texkey](https://inspirehep.net/literature/$inspire)"
+  [[ $arxiv ]] && arxiv="[[$arxiv](https://arxiv.org/abs/$arxiv)]"
+  [[ $url ]] && url="[[PDF]($url)]"
+  
+  print "## $texkey$arxiv$url $title"
+  print "Authors: $authors"
+  print
+  print "$abstract"
+}
+
+function ihep/metadata/print-header {
+  local REPLY
+  ihep/metadata/load "$1" || return 1
+
+  local texkey=${REPLY[0]}
+  local inspire=${REPLY[1]}
+  local title=${REPLY[4]}
+  local authors=${REPLY[5]}
+  authors=${authors//?([[:space:]])(+([!()]))}
+  if ((${#authors}>72)); then
+    authors=${authors::72}
+    authors="${authors%,*} et al."
+  fi
+  ihep/metadata/print-markdown/.escape texkey inspire title authors
+
+  print "## **$texkey** $authors, $title"
+  print "https://inspirehep.net/literature/$inspire"
+}
+
+function ihep/sub:abstract {
+  ihep/metadata/print-abstract "$1"
+}
+function ihep/sub:header {
+  ihep/metadata/print-header "$1"
+}
+
+## @fn ihep/metadata/append-header file texkey opts
+function ihep/metadata/append-header {
+  local file=$1 texkey=$2 opts=$3
+
+  local -x date=
+  if [[ :$opts: == *:date:* ]]; then
+    local REPLY
+    ihep/util/date; date=$REPLY
+  fi
+
+  if [[ -s $file ]]; then
+    local script='
+      BEGIN {
+        date = ENVIRON["date"];
+
+        is_found = 0;
+        enabled = 0;
+        if (date == "") enabled = 1;
+      }
+      date != "" && /^# '$date'$/ { enabled = 1; next; }
+      date != "" && /^# [0-9]{4}-[0-9]{1,2}-[0-9]{1,2}/ { enabled = 0; next; }
+      enabled && /^## \*\*'$texkey'\*\*/ { is_found = 1; exit 0; }
+      END {
+        if (!is_found) {
+          if (date != "" && !enabled) exit 10; # we append date
+          exit 1;
+        }
+      }
+    '
+    awk "$script" "$file"; local ext=$?
+    if ((ext == 0)); then
+      # We already have an entry in the file so don't have to do anything.
+      return 0
+    elif ((ext != 10)); then
+      # We are already in the desired context at the end of the file.
+      date=
+    fi
+  else
+    mkfd "$file"
+  fi
+
+  {
+    if [[ $date ]]; then
+      print
+      print "# $date"
+    fi
+    print
+    ihep/metadata/print-header "$texkey"
+  } >> "$file"
+}
+
+## @fn ihep/metadata/record texkey
+function ihep/metadata/record {
+  local texkey=$1
+
+  local fname_access=$_ihep_base_state/access_log.md
+  ihep/metadata/append-header "$fname_access" "$texkey" date
+
+  local fname_references=references.md
+  [[ -f $fname_references ]] &&
+    ihep/metadata/append-header "$fname_references" "$texkey"
+}
+
 #------------------------------------------------------------------------------
 
 function ihep/fulltext/find {
-  ihep/metadata/load "$1" || return "$?"
+  local query=$1 opts=$2
+  ihep/metadata/load "$query" || return "$?"
 
   local texkey=${REPLY[0]} url=${REPLY[3]}
 
   local fname_fulltext=$_ihep_base_data/fulltext/${texkey//:}.pdf
-  if [[ -s $fname_fulltext ]]; then
-    # file already exists
-    REPLY=$fname_fulltext
-    return 0
+  if [[ ! -s $fname_fulltext ]]; then
+    if [[ ! $url ]]; then
+      print 'failed to determine the fulltext URL' >&2
+      return 1
+    fi
+    mkfd "$fname_fulltext"
+    if ! dl "$url" "$fname_fulltext"; then
+      print 'failed to download the file.' >&2
+      print "url=$url" >&2
+      return 1
+    fi
   fi
 
-  if [[ ! $url ]]; then
-    print 'failed to determine the fulltext URL' >&2
-    return 1
-  fi
-  mkfd "$fname_fulltext"
-  if ! dl "$url" "$fname_fulltext"; then
-    print 'failed to download the file.' >&2
-    print "url=$url" >&2
-    return 1
-  fi
   REPLY=$fname_fulltext
+  [[ :$opts: == *:record:* ]] &&
+    ihep/metadata/record "$texkey"
   return 0
 }
 
@@ -317,14 +483,14 @@ function ihep/sub:store {
 
 function ihep/sub:fulltext {
   local REPLY
-  if ihep/fulltext/find "$@"; then
+  if ihep/fulltext/find "$1" record; then
     print "$REPLY"
   fi
 }
 
 function ihep/sub:open {
   local REPLY
-  if ihep/fulltext/find "$@"; then
+  if ihep/fulltext/find "$1" record; then
     ihep/util/open "$REPLY"
   fi
 }

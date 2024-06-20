@@ -7,6 +7,17 @@ where you store the specific PDF?  This small tool defines the central
 repository of the PDF files in your home directory and allow managing the PDF
 files.
 
+# Prerequisites
+
+- `rsync`
+- `node` (Node.js)
+
+In Windows, Node.js can be set up by following Ref. [1]:
+
+- [1] [Set up Node.js on native Windows | Microsoft Learn](https://learn.microsoft.com/en-us/windows/dev-environment/javascript/nodejs-on-windows)
+
+# Usage
+
 ## Download PDF
 
 If the PDF hasn't yet been downloaded, it will be downloaded in the cache
