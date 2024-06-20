@@ -2,10 +2,19 @@
 
 # 2024-06-18
 _ihep_user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
-_ihep_archive=./archive
+
+_ihep_base_data=~/.local/share/ihep
+_ihep_base_state=~/.local/state/ihep
 _ihep_base_run=./tmp
 
 function string#match { [[ $1 =~ $2 ]]; }
+function string#split {
+  local IFS=$2 _txt=$3
+  set -f
+  builtin eval -- "$1=(\$_txt)"
+  set +f
+  return 0
+}
 
 function mkd {
   if [[ $1 && ! -d $1 ]]; then
@@ -45,70 +54,196 @@ function dl-inspirehep {
   dl "$@"
 }
 
-function ihep/download/search-and-download {
-  local search_url=
+#------------------------------------------------------------------------------
+# ihep/metadata
+
+_ihep_sep=''
+_ihel_term_nl=$'\n'
+function ihep/metadata/.sanitize-value {
+  local _var _val
+  for _var; do
+    [[ ${!_var} == *["$_ihep_sep$_ihel_term_nl"]* ]] || continue
+    _val=${!_var}
+    _val=${_val//["$_ihep_sep$_ble_term_nl"]/ }
+    printf -v "$_var" %s "$_val"
+  done
+}
+
+## @var _ihep_fname_metadata
+##   This is the filename that stores the metadata.  Each line consists of the
+##   following fields separated by _ihep_sep (^^).
+##
+##   - $1 = texkey
+##   - $2 = inspire
+##   - $3 = arxiv
+##   - $4 = url
+##   - $5 = title
+##   - $6 = authors
+##   - $7 = abstract
+##
+_ihep_fname_metadata=$_ihep_base_data/literature.metadata.txt
+
+## @fn ihep/metadata/load-by-column column value
+##   @var[out] REPLY
+function ihep/metadata/load-by-column {
+  [[ -s $_ihep_fname_metadata ]] || return 1
+  local -x value=$2
+  local script='
+    BEGIN { value = ENVIRON["value"]; }
+    $'$1' == value { print; is_found = 1; exit 0; }
+    END { if (!is_found) exit 1; }
+  '
+  local result=$(awk -F "$_ihep_sep" "$script" "$_ihep_fname_metadata")
+  [[ $result ]] || return 1
+  string#split REPLY "$_ihep_sep" "$result"
+}
+## @fn ihep/metadata/load-by-texkey value
+##   @var[out] REPLY
+function ihep/metadata/load-by-texkey {
+  ihep/metadata/load-by-column 1 "$1"
+}
+## @fn ihep/metadata/load-by-arxiv value
+##   @var[out] REPLY
+function ihep/metadata/load-by-arxiv {
+  ihep/metadata/load-by-column 3 "$1"
+}
+
+## @fn ihep/metadata/has-texkey texkey
+function ihep/metadata/has-texkey {
+  [[ -s $_ihep_fname_metadata ]] || return 1
+  local -x value=$1
+  local script='
+    BEGIN { value = ENVIRON["value"]; }
+    $1 == value { is_found = 1; exit 0; }
+    END { if (!is_found) exit 1; }
+  '
+  awk -F "$_ihep_sep" "$script" "$_ihep_fname_metadata"
+}
+
+## @fn ihep/metadata/identify text
+##   @var[out] type
+##   @var[out] value
+function ihep/metadata/parse {
   if string#match "$1" '^(ar[Xx]iv:)?([0-9]{4}\.[0-9]{4,5})$'; then
     # arXiv
-    search_url='https://inspirehep.net/api/literature?sort=mostrecent&size=25&page=1&q=arXiv%3A'${BASH_REMATCH[2]}
+    type=arxiv
+    value=${BASH_REMATCH[2]}
+    return 0
   elif string#match "$1" '^([A-Z][a-zA-Z0-9]+):?((19|20)[0-9]{2}[a-z]{3})$'; then
-    # inspirehep TeX key
-    local key=${BASH_REMATCH[1]}:${BASH_REMATCH[2]}
-    search_url='https://inspirehep.net/api/literature?sort=mostrecent&size=25&page=1&q='$key
+    # inspirehep texkey
+    type=texkey
+    value=${BASH_REMATCH[1]}:${BASH_REMATCH[2]}
+    return 0
   else
-    printf '%s\n' "unrecognized query '$1'" >&2
-    return 2
+    return 1
   fi
-  
+}
+
+## @fn ihep/metadata/load/.fetch type value
+##   Retrieve data from inspirehep.net
+function ihep/metadata/load/.fetch {
+  local type=$1 value=$2
+
+  local search_url=
+  case $type in
+  (arxiv)
+    search_url='https://inspirehep.net/api/literature?sort=mostrecent&size=25&page=1&q=arXiv%3A'$value ;;
+  (texkey)
+    search_url='https://inspirehep.net/api/literature?sort=mostrecent&size=25&page=1&q='${value//:/'%3A'} ;;
+  (*)
+    printf '%s\n' "ihep: FATAL unrecognized type '$type'" >&2
+    return 1 ;;
+  esac
+
   local tmp1=$_ihep_base_run/search.json
   mkfd "$tmp1"
   dl-inspirehep "$search_url" "$tmp1"
 
   local metadata
   if ! metadata=$(node inspirehep-extract-metadata.js "$tmp1"); then
-    printf '%s\n' "failed to call inspirehep-extract-metadata" >&2
+    printf '%s\n' "ihep: failed to call inspirehep-extract-metadata" >&2
     return 1
   fi
-
-  local key= url=
+  local texkey= inspire= arxiv= url= title= authors= abstract=
   builtin eval -- "$metadata"
-
-  if [[ ! $key ]]; then
-    printf '%s\n' 'failed to determine the key' >&2
+  if [[ ! $texkey ]]; then
+    printf '%s\n' 'ihep: failed to determine the texkey' >&2
     return 1
   fi
-  local filename=$_ihep_archive/${key//:}.pdf
-  if [[ -s $filename ]]; then
+
+  ihep/metadata/.sanitize-value texkey inspire arxiv url title authors abstract
+  REPLY=("$texkey" "$inspire" "$arxiv" "$url" "$title" "$authors" "$abstract")
+
+  if ! ihep/metadata/has-texkey "$texkey"; then
+    mkfd "$_ihep_fname_metadata"
+    {
+      printf "%s$_ihep_sep" "${REPLY[@]}"
+      printf '\n'
+    } >> "$_ihep_fname_metadata"
+  fi
+
+  return 0
+}
+
+function ihep/metadata/load {
+  local type= value=
+  if ! ihep/metadata/parse "$1"; then
+    printf '%s\n' "ihep: unrecognized query '$1'" >&2
+    return 2
+  fi
+
+  case $type in
+  (arxiv) ihep/metadata/load-by-arxiv "$value" && return 0 ;;
+  (texkey) ihep/metadata/load-by-texkey "$value" && return 0 ;;
+  esac
+
+  ihep/metadata/load/.fetch "$type" "$value"
+}
+
+#------------------------------------------------------------------------------
+
+function ihep/fulltext/find {
+  ihep/metadata/load "$1" || return "$?"
+
+  local texkey=${REPLY[0]} url=${REPLY[3]}
+
+  local fname_fulltext=$_ihep_base_data/fulltext/${texkey//:}.pdf
+  if [[ -s $fname_fulltext ]]; then
     # file already exists
-    REPLY=$filename
+    REPLY=$fname_fulltext
     return 0
   fi
 
   if [[ ! $url ]]; then
-    printf '%s\n' 'failed to determine the full text URL' >&2
+    printf '%s\n' 'failed to determine the fulltext URL' >&2
     return 1
   fi
-  mkd "$_ihep_archive"
-  if ! dl "$url" "$filename"; then
+  mkfd "$fname_fulltext"
+  if ! dl "$url" "$fname_fulltext"; then
     printf '%s\n' 'failed to download the file.' >&2
     printf '%s\n' "url=$url" >&2
     return 1
   fi
-  REPLY=$filename
+  REPLY=$fname_fulltext
   return 0
 }
 
-function ihep/sub:download {
+function ihep/sub:fulltext {
   local REPLY
-  if ihep/download/search-and-download "$@"; then
+  if ihep/fulltext/find "$@"; then
     printf '%s\n' "$REPLY"
   fi
 }
 
 function ihep/sub:open {
   local REPLY
-  if ihep/download/search-and-download "$@"; then
+  if ihep/fulltext/find "$@"; then
     open "$REPLY"
   fi
+}
+
+function ihep/sub:eval {
+  builtin eval -- "$1"
 }
 
 function main {
