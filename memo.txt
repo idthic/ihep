@@ -47,6 +47,8 @@ ihep
 
 2024-06-20
 
+* search: 論文検索機能 [#D0009]
+
 * base: シンボリックリンクから起動してもちゃんと動く様にする [#D0008]
 
   readlink or realpath

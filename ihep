@@ -390,8 +390,8 @@ function ihep/metadata/load/.fetch {
   dl-inspirehep "$search_url" "$tmp1"
 
   local metadata
-  if ! metadata=$(node "$_ihep_base/inspirehep-extract-metadata.js" "$tmp1"); then
-    print "ihep: failed to call inspirehep-extract-metadata" >&2
+  if ! metadata=$(node "$_ihep_base/inspire-extract-metadata.js" "$tmp1"); then
+    print "ihep: failed to call inspire-extract-metadata" >&2
     return 1
   fi
   local texkey= inspire= arxiv= url= title= authors= abstract=
@@ -677,6 +677,67 @@ function ihep/sub:push {
   fi
 
   ihep/fulltext/push
+}
+
+#------------------------------------------------------------------------------
+
+function ihep/search/.urlencode {
+  REPLY=$1
+  if [[ $REPLY == *[!-._~_a-zA-Z0-9]* ]]; then
+    local LC_ALL=C
+    local i n=${#REPLY} data=$REPLY code
+    REPLY=
+    for ((i = 0; i < n; i++)); do
+      printf -v code %d "'${data:i:1}"
+      if ((
+           0x30 <= code && code <= 0x39 ||
+           0x41 <= code && code <= 0x5a ||
+           0x61 <= code && code <= 0x7a ||
+           code == 0x2d || code == 0x2e ||
+           code == 0x5f || code == 0x7e
+         ))
+      then
+        REPLY=$REPLY${data:i:1}
+      elif ((code == 0x20)); then
+        REPLY=$REPLY+
+      else
+        printf -v code '%%%02X' "$code"
+        REPLY=$REPLY$code
+      fi
+    done
+  fi
+}
+
+#------------------------------------------------------------------------------
+# search
+
+function ihep/search {
+  local q=$1
+  if [[ ! $q ]]; then
+    if (($#)); then
+      print 'ihep: search: query is empty.' >&2
+    else
+      print 'usage: ihep search <query>' >&2
+    fi
+    return 2
+  fi
+
+  local REPLY
+  ihep/search/.urlencode "$q"
+  local search_url='https://inspirehep.net/api/literature?sort=mostrecent&size=25&page=1&q='$REPLY
+
+  local tmp1=$_ihep_base_run/search.json
+  mkfd "$tmp1"
+  if ! dl-inspirehep "$search_url" "$tmp1"; then
+    print 'ihep: failed to get the search results' >&2
+    return 1
+  fi
+
+  node "$_ihep_base/inspire-print-search-result.js" "$tmp1"
+}
+
+function ihep/sub:search {
+  ihep/search "$*"
 }
 
 #------------------------------------------------------------------------------

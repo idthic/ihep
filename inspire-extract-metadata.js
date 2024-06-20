@@ -6,7 +6,7 @@ function print_variable(var_name, val) {
 }
 
 if (process.argv.length < 2) {
-  console.error("usage: node download-pdf.js <search.json>");
+  console.error("usage: node inspire-extract-metadata.js <search.json>");
   process.exit(2);
 }
 const input_filename = process.argv[2];
