@@ -17,16 +17,17 @@ function string#split {
   return 0
 }
 function array#push { builtin eval "$1+=(\"\${@:2}\")"; }
+function ihep/bin#has { type -t -- "$1" &>/dev/null; }
 
 function ihep/base/check-environment {
   unset -f "$FUNCNAME"
   local flags=
-  if ! type -t node &>/dev/null; then
+  if ! ihep/bin#has node; then
     print 'ihep: The command "node" (Node.js) is not found.' >&2
     flags=E$flags
   fi
 
-  if ! type -t rsync &>/dev/null; then
+  if ! ihep/bin#has rsync; then
     print 'ihep: The command "rsync" is not found.' >&2
     flags=E$flags
   fi
@@ -62,9 +63,29 @@ function dl {
     mv "$dst.part" "$dst"
 }
 
-function open {
-  if [[ $OSTYPE == cygwin ]]; then
-    cygstart "$1"
+function ihep/util/open {
+  local file=$1
+  case $file in
+  (*.pdf)
+    if [[ $_ihep_config_open_cmd_pdf ]]; then
+      builtin eval -- "$_ihep_config_open_cmd_pdf \"\$file\""
+      return "$?"
+    fi ;;
+  esac
+
+  if [[ $_ihep_config_open_cmd ]]; then
+    builtin eval -- "$_ihep_config_open_cmd \"\$file\""
+  elif ihep/bin#has cygstart; then
+    cygstart "$file"
+  elif ihep/bin#has wslstart; then
+    wslstart "$file"
+  elif ihep/bin#has xdg-open; then
+    xdg-open "$file"
+  elif ihep/bin#has open; then
+    open "$file"
+  else
+    print "ihep: no resolver for '$file' found." >&2
+    print "$file"
   fi
 }
 
@@ -74,6 +95,8 @@ function dl-inspirehep {
 }
 
 _ihep_config_remote=
+_ihep_config_open_cmd=
+_ihep_config_open_cmd_pdf=
 if [[ -s ~/.config/ihep/config.bash ]]; then
   source ~/.config/ihep/config.bash
 fi
@@ -302,7 +325,7 @@ function ihep/sub:fulltext {
 function ihep/sub:open {
   local REPLY
   if ihep/fulltext/find "$@"; then
-    open "$REPLY"
+    ihep/util/open "$REPLY"
   fi
 }
 
