@@ -176,7 +176,8 @@ function ihep/base/check-environment {
   unset -f "$FUNCNAME"
   local flags=
 
-  if ! ihep/bin#has node; then
+  _ihep_bin_node=$(type -P node 2>/dev/null)
+  if [[ ! $_ihep_bin_node ]]; then
     print 'ihep: The command "node" (Node.js) is not found.' >&2
     flags=E$flags
   fi
@@ -262,6 +263,19 @@ function ihep/util/fold {
   else
     cat
   fi
+}
+
+function ihep/util/node {
+  local -a args
+  args=("$@")
+  if [[ $_ihep_bin_node == /cygdrive/* ]] && ihep/bin#has cygpath; then
+    local i
+    for i in "${!args[@]}"; do
+      [[ ${args[i]} == /* && ( -e ${args[i]} || -e ${args[i]%/*} ) ]] &&
+        args[i]=$(cygpath -w "${args[i]}")
+    done
+  fi
+  "$_ihep_bin_node" "${args[@]}"
 }
 
 function dl-inspirehep {
@@ -390,7 +404,7 @@ function ihep/metadata/load/.fetch {
   dl-inspirehep "$search_url" "$tmp1"
 
   local metadata
-  if ! metadata=$(node "$_ihep_base/inspire-extract-metadata.js" "$tmp1"); then
+  if ! metadata=$(ihep/util/node "$_ihep_base/inspire-extract-metadata.js" "$tmp1"); then
     print "ihep: failed to call inspire-extract-metadata" >&2
     return 1
   fi
@@ -733,7 +747,7 @@ function ihep/search {
     return 1
   fi
 
-  node "$_ihep_base/inspire-print-search-result.js" "$tmp1"
+  ihep/util/node "$_ihep_base/inspire-print-search-result.js" "$tmp1"
 }
 
 function ihep/sub:search {
