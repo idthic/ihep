@@ -18,11 +18,22 @@ function string#split {
 }
 function array#push { builtin eval "$1+=(\"\${@:2}\")"; }
 
-# environment check
-if ! type -t node 2>/dev/null; then
-  print 'ihep: The command "node" (Node.js) is not found.' >&2
-  exit 1
-fi
+function ihep/base/check-environment {
+  unset -f "$FUNCNAME"
+  local flags=
+  if ! type -t node &>/dev/null; then
+    print 'ihep: The command "node" (Node.js) is not found.' >&2
+    flags=E$flags
+  fi
+
+  if ! type -t rsync &>/dev/null; then
+    print 'ihep: The command "rsync" is not found.' >&2
+    flags=E$flags
+  fi
+
+  [[ $flags != *E* ]]
+}
+ihep/base/check-environment || exit 1
 
 function mkd {
   if [[ $1 && ! -d $1 ]]; then
@@ -273,6 +284,8 @@ function ihep/sub:store {
       continue
     fi
 
+    print "storing $file -> ${fname_fulltext##*/}..."
+    chmod 644 "$file"
     mkfd "$fname_fulltext"
     mv "$file" "$fname_fulltext"
   done
