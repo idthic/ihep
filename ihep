@@ -7,6 +7,7 @@ _ihep_base_data=~/.local/share/ihep
 _ihep_base_state=~/.local/state/ihep
 _ihep_base_run=./tmp
 
+function print { printf '%s\n' "$1"; }
 function string#match { [[ $1 =~ $2 ]]; }
 function string#split {
   local IFS=$2 _txt=$3
@@ -15,8 +16,13 @@ function string#split {
   set +f
   return 0
 }
+function array#push { builtin eval "$1+=(\"\${@:2}\")"; }
 
-function print { printf '%s\n' "$1"; }
+# environment check
+if ! type -t node 2>/dev/null; then
+  print 'ihep: The command "node" (Node.js) is not found.' >&2
+  exit 1
+fi
 
 function mkd {
   if [[ $1 && ! -d $1 ]]; then
@@ -55,6 +61,11 @@ function dl-inspirehep {
   local _ihep_cookies=$_ihep_base_run/inspirehep.cookies.txt
   dl "$@"
 }
+
+_ihep_config_remote=
+if [[ -s ~/.config/ihep/config.bash ]]; then
+  source ~/.config/ihep/config.bash
+fi
 
 #------------------------------------------------------------------------------
 # ihep/metadata
@@ -281,6 +292,55 @@ function ihep/sub:open {
     open "$REPLY"
   fi
 }
+
+function ihep/fulltext/push {
+  local remote=$_ihep_config_remote
+  [[ $remote ]] || return 1
+  [[ $remote == *:* ]] || remote=$remote':~/.local/share/ihep'
+
+  [[ -d $_ihep_base_data/fulltext ]] || return 0
+  (
+    cd "$_ihep_base_data/fulltext" || return 1
+
+    local -a files=()
+
+    # list up files to send
+    if (($#)); then
+      local file
+      for file; do
+        file=${file%.pdf}
+        file=${file##*/}
+        [[ $file ]] && array#push files "$file.pdf"
+      done
+    else
+      files=(*.pdf)
+    fi
+
+    # exclude empty files
+    local i
+    for i in "${!files[@]}"; do
+      if [[ ! -s ${files[i]} ]]; then
+        mv "${files[i]}" "${files[i]}.part"
+        unset -v 'files[i]'
+      fi
+    done
+    files=("${files[@]}")
+
+    # send files
+    rsync -avz --ignore-existing "${files[@]}" "$remote"/fulltext/
+  )
+}
+
+function ihep/sub:push {
+  if [[ ! $_ihep_config_remote ]]; then
+    print 'ihep: config "_ihep_config_remote" is not set' >&2
+    return 1
+  fi
+
+  ihep/fulltext/push
+}
+
+#------------------------------------------------------------------------------
 
 function ihep/sub:eval {
   builtin eval -- "$1"
