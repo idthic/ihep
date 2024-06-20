@@ -16,6 +16,8 @@ function string#split {
   return 0
 }
 
+function print { printf '%s\n' "$1"; }
+
 function mkd {
   if [[ $1 && ! -d $1 ]]; then
     mkdir -p "$1"
@@ -125,14 +127,22 @@ function ihep/metadata/has-texkey {
 ##   @var[out] value
 function ihep/metadata/parse {
   if string#match "$1" '^(ar[Xx]iv:)?([0-9]{4}\.[0-9]{4,5})$'; then
-    # arXiv
     type=arxiv
     value=${BASH_REMATCH[2]}
     return 0
-  elif string#match "$1" '^([A-Z][a-zA-Z0-9]+):?((19|20)[0-9]{2}[a-z]{3})$'; then
-    # inspirehep texkey
+  elif string#match "$1" '^([A-Z][a-zA-Z0-9]+):?((19|20)[0-9]{2}[a-z]{2,3})$'; then
     type=texkey
     value=${BASH_REMATCH[1]}:${BASH_REMATCH[2]}
+    return 0
+  elif string#match "$1" '(^|/)([0-9]{4}\.[0-9]{4,5})(v[0-9]{1,2})?( \([0-9]{1,2}\))?\.pdf$'; then
+    # A file downloaded from arXiv
+    type=arxiv
+    value=${BASH_REMATCH[2]}
+    return 0
+  elif string#match "$1" '(^|/)([A-Z][a-zA-Z0-9]+):?((19|20)[0-9]{2}[a-z]{2,3})( \([0-9]{1,2}\))?\.pdf$'; then
+    # A file named by inspirehep texkey
+    type=texkey
+    value=${BASH_REMATCH[2]}:${BASH_REMATCH[3]}
     return 0
   else
     return 1
@@ -151,7 +161,7 @@ function ihep/metadata/load/.fetch {
   (texkey)
     search_url='https://inspirehep.net/api/literature?sort=mostrecent&size=25&page=1&q='${value//:/'%3A'} ;;
   (*)
-    printf '%s\n' "ihep: FATAL unrecognized type '$type'" >&2
+    print "ihep: FATAL unrecognized type '$type'" >&2
     return 1 ;;
   esac
 
@@ -161,13 +171,13 @@ function ihep/metadata/load/.fetch {
 
   local metadata
   if ! metadata=$(node inspirehep-extract-metadata.js "$tmp1"); then
-    printf '%s\n' "ihep: failed to call inspirehep-extract-metadata" >&2
+    print "ihep: failed to call inspirehep-extract-metadata" >&2
     return 1
   fi
   local texkey= inspire= arxiv= url= title= authors= abstract=
   builtin eval -- "$metadata"
   if [[ ! $texkey ]]; then
-    printf '%s\n' 'ihep: failed to determine the texkey' >&2
+    print 'ihep: failed to determine the texkey' >&2
     return 1
   fi
 
@@ -188,7 +198,7 @@ function ihep/metadata/load/.fetch {
 function ihep/metadata/load {
   local type= value=
   if ! ihep/metadata/parse "$1"; then
-    printf '%s\n' "ihep: unrecognized query '$1'" >&2
+    print "ihep: unrecognized query '$1'" >&2
     return 2
   fi
 
@@ -215,23 +225,53 @@ function ihep/fulltext/find {
   fi
 
   if [[ ! $url ]]; then
-    printf '%s\n' 'failed to determine the fulltext URL' >&2
+    print 'failed to determine the fulltext URL' >&2
     return 1
   fi
   mkfd "$fname_fulltext"
   if ! dl "$url" "$fname_fulltext"; then
-    printf '%s\n' 'failed to download the file.' >&2
-    printf '%s\n' "url=$url" >&2
+    print 'failed to download the file.' >&2
+    print "url=$url" >&2
     return 1
   fi
   REPLY=$fname_fulltext
   return 0
 }
 
+function ihep/sub:store {
+  local file flags=
+  for file; do
+    if [[ $file != *.pdf ]]; then
+      print "ihep: unrecognized file type '$file'" >&2
+      flags=E$flags
+      continue
+    fi
+
+    local REPLY
+    if ! ihep/metadata/load "$file"; then
+      print "ihep: unrecognized form of the filename '${file##*/}'" >&2
+      flags=E$flags
+      continue
+    fi
+
+    local texkey=${REPLY[0]}
+    local fname_fulltext=$_ihep_base_data/fulltext/${texkey//:}.pdf
+    if [[ -s $fname_fulltext ]]; then
+      print "ihep: file '${file##*/}' already exists at '$fname_fulltext'." >&2
+      flags=E$flags
+      continue
+    fi
+
+    mkfd "$fname_fulltext"
+    mv "$file" "$fname_fulltext"
+  done
+  [[ $flags != *E* ]]
+}
+
 function ihep/sub:fulltext {
   local REPLY
   if ihep/fulltext/find "$@"; then
-    printf '%s\n' "$REPLY"
+    print "$REPLY"
   fi
 }
 
@@ -251,9 +291,9 @@ function main {
     "ihep/sub:$@"
   else
     if (($#)); then
-      printf '%s\n' "ihep: unrecognized subcommand '$1'" >&2
+      print "ihep: unrecognized subcommand '$1'" >&2
     else
-      printf 'usage: ihep <subcommand> <args>...\n'
+      print 'usage: ihep <subcommand> <args>...'
     fi
     return 2
   fi
