@@ -286,14 +286,65 @@ function dl-inspirehep {
 _ihep_config_remote=
 _ihep_config_open_cmd=
 _ihep_config_open_cmd_pdf=
+_ihep_config_reference_file=
+_ihep_config_project_root=$PWD
 if [[ -s ~/.config/ihep/config.bash ]]; then
   source ~/.config/ihep/config.bash
 fi
 
+function ihep/base/load-local-config {
+  unset -f "$FUNCNAME"
+
+  # Note: the root directory is represented by an empty string path="" within
+  # this loop.
+  local path=${PWD%/} config
+  while true; do
+    config=$path/.ihepconfig
+    if [[ -e $config.bash && ! -d $config.bash ]]; then
+      config=$config.bash
+      break
+    elif [[ -e $config.sh && ! -d $config.sh ]]; then
+      config=$config.sh
+      break
+    elif [[ -e $config && ! -d $config ]]; then
+      break
+    fi
+    [[ $path != */* ]] && return 1
+    path=${path%/*}
+
+    # If the owner of the parent directory is different, it is probably outside
+    # the project directory.  We stop searching in this case.
+    [[ -O $PWD && ! -O ${path:-/} ]] && return 1
+  done
+
+  # sanity check
+  [[ $path ]] || path=/
+  if [[ ! -O $config || ! -O $path ]]; then
+    if [[ -O $PWD ]]; then
+      # When the current directory is owned by the current user, yet the found
+      # config or the directory is not, it probably means that the config file
+      # is not for the current project.  We silently ignore such a cnofig file.
+      return 1
+    elif [[ -w $config ]]; then
+      print "ihep: the config '$config' is world writable. Please check the permission." >&2
+      return 2
+    elif [[ -w $path ]]; then
+      print "ihep: the config '$config' is located in a world-writable directory. Please check the permission." >&2
+      return 2
+    fi
+  fi
+
+  _ihep_config_project_root=$path
+  set --
+  source "$config"
+  return "$?"
+}
+ihep/base/load-local-config
+
 #------------------------------------------------------------------------------
 # ihep/metadata
 
-_ihep_sep=''
+_ihep_sep=$'\x1e'
 _ihel_term_nl=$'\n'
 function ihep/metadata/.sanitize-value {
   local _var _val
@@ -567,9 +618,19 @@ function ihep/metadata/record {
   local fname_access=$_ihep_base_state/access_log.md
   ihep/metadata/append-header "$fname_access" "$texkey" date
 
-  local fname_references=references.md
-  [[ -f $fname_references ]] &&
-    ihep/metadata/append-header "$fname_references" "$texkey"
+  local fname_references=$_ihep_config_reference_file
+  if [[ $fname_references ]]; then
+    if [[ $fname_references != /* && $_ihep_config_project_root ]]; then
+      fname_references=${_ihep_config_project_root%/}/$fname_references
+    fi
+  elif [[ -f $_ihep_config_project_root/references.md ]]; then
+    fname_references=$_ihep_config_project_root/references.md
+  else
+    # The reference file is not activated.
+    return 1
+  fi
+
+  ihep/metadata/append-header "$fname_references" "$texkey"
 }
 
 #------------------------------------------------------------------------------
