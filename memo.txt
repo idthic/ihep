@@ -51,6 +51,13 @@ ihep
 
 2024-06-21
 
+* 古い形式の arXiv の番号を持ったファイルが特定できない [#D0012]
+
+  inspire は arXiv:番号 だけでは結果を返さない。arXiv:hep-ph/番号 などの様に分
+  類も示す必要がある。分類は PDF の中を strings で dump して正規表現で一致させ
+  れば良い? strings で grep して見たら arXiv へのリンクを埋め込んでいる様なので
+  それに対して一致させれば良い。
+
 * [resolved] 一言メモをつける機能? 或いはメモを作成する機能 [#D0011]
 
   これは _ihep_config_reference_file で設定できる様にした。

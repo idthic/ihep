@@ -187,6 +187,9 @@ function ihep/base/check-environment {
     flags=E$flags
   fi
 
+  # required: strings, sed, awk, ln, mv, mkdir, cat, ls
+  # optional: ifold, fold
+
   [[ $flags != *E* ]]
 }
 ihep/base/check-environment || exit 1
@@ -429,6 +432,14 @@ function ihep/metadata/parse {
     type=texkey
     value=${BASH_REMATCH[2]}:${BASH_REMATCH[3]}
     return 0
+  elif
+    string#match "$1" '(^|/)([0-9]+)(v[0-9]+)?\.pdf$' &&
+      [[ -s $1 ]] &&
+      string#match "$(strings "$1" | sed -n 's|^.*https\{0,1\}://arxiv\.org/[a-z]\{3\}/\([-_a-zA-Z0-9]\{1,\}/[0-9]*\)[v(){}<>].*$|\1|p')" "[-_a-zA-Z0-9]+/${BASH_REMATCH[2]}"
+  then
+    # 0304012v1.pdf: A file downloaded from arXiv (old numbering)
+    type=arxiv
+    value=$BASH_REMATCH
   else
     return 1
   fi
