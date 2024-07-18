@@ -440,13 +440,22 @@ function ihep/metadata/parse {
     # 0304012v1.pdf: A file downloaded from arXiv (old numbering)
     type=arxiv
     value=$BASH_REMATCH
+  elif string#match "$1" '(^|/)PhysRev([A-Z]\.[0-9]+\.[0-9]+)\.pdf$'; then
+    # A file downloaded from Phys. Rev.
+    type=search
+    value='Phys.Rev.'${BASH_REMATCH[2]}
+    return 0
   else
-    return 1
+    type=search
+    local REPLY
+    ihep/search/.adjust-query "$1"
+    value=$REPLY
   fi
 }
 
 ## @fn ihep/metadata/load/.fetch type value
 ##   Retrieve data from inspirehep.net
+##   @var[out] REPLY
 function ihep/metadata/load/.fetch {
   local type=$1 value=$2
 
@@ -456,6 +465,9 @@ function ihep/metadata/load/.fetch {
     search_url='https://inspirehep.net/api/literature?sort=mostrecent&size=25&page=1&q=arXiv%3A'$value ;;
   (texkey)
     search_url='https://inspirehep.net/api/literature?sort=mostrecent&size=25&page=1&q='${value//:/'%3A'} ;;
+  (search)
+    ihep/search/.urlencode "$value"
+    search_url='https://inspirehep.net/api/literature?sort=mostrecent&size=25&page=1&q='$REPLY ;;
   (*)
     print "ihep: FATAL unrecognized type '$type'" >&2
     return 1 ;;
@@ -767,6 +779,19 @@ function ihep/sub:push {
 
 #------------------------------------------------------------------------------
 
+function ihep/search/.adjust-query {
+  REPLY=$1
+  if string#match "$REPLY" '^PR([A-ELX])[[:space:]]?([0-9].*)$'; then
+    REPLY='Phys.Rev.'${BASH_REMATCH[1]}' '${BASH_REMATCH[2]}
+  elif string#match "$REPLY" '^PL([A-E])[[:space:]]?([0-9].*)$'; then
+    REPLY='Phys.Lett.'${BASH_REMATCH[1]}' '${BASH_REMATCH[2]}
+  elif string#match "$REPLY" '^NP([A-E])[[:space:]]?([0-9].*)$'; then
+    REPLY='Nucl.Phys.'${BASH_REMATCH[1]}' '${BASH_REMATCH[2]}
+  elif string#match "$REPLY" '^PPNP[[:space:]]?([0-9].*)$'; then
+    REPLY='Prog.Part.Nucl.Phys.'${BASH_REMATCH[1]}
+  fi
+}
+
 function ihep/search/.urlencode {
   REPLY=$1
   if [[ $REPLY == *[!-._~_a-zA-Z0-9]* ]]; then
@@ -809,7 +834,8 @@ function ihep/search {
   fi
 
   local REPLY
-  ihep/search/.urlencode "$q"
+  ihep/search/.adjust-query "$q"
+  ihep/search/.urlencode "$REPLY"
   local search_url='https://inspirehep.net/api/literature?sort=mostrecent&size=25&page=1&q='$REPLY
 
   local tmp1=$_ihep_base_run/search.json
