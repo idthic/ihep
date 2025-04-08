@@ -1,13 +1,16 @@
 # ihep
 
-A small CLI tool to download and open PDF files of papers.
+A small CLI tool to download and open PDF files of papers in high-energy
+physics.  This is based on the REST API of INSPIRE (inspirehep.net).
 
-Do you download the PDF file of the same paper many times because you forgot
+Do you download a PDF file of the same paper many times because you forget
 where you store the specific PDF?  This small tool defines the central
 repository of the PDF files in your home directory and allow managing the PDF
 files.
 
-# Prerequisites
+# Start using
+
+## Prerequisites
 
 - `rsync`
 - `node` (Node.js)
@@ -16,7 +19,16 @@ In Windows, Node.js can be set up by following Ref. [1]:
 
 - [1] [Set up Node.js on native Windows | Microsoft Learn](https://learn.microsoft.com/en-us/windows/dev-environment/javascript/nodejs-on-windows)
 
-# Usage
+## Install
+
+```bash
+$ git clone git@github.com:idthic/ihep.git
+$ ihep/ihep install
+```
+
+The command `ihep/ihep install` will create a symbolic in `~/.local/bin/ihep`.
+Please make sure that `~/.local/bin` is in your `PATH`.  If you don't like it,
+you can manually create a symbolic link somewhere.
 
 ## Download PDF
 
