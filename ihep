@@ -149,7 +149,7 @@ function ihep/sub:install {
 # 2024-06-18
 _ihep_user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36'
 
-
+function is-function { declare -F "$1" &>/dev/null; }
 function print { ihep/util/print "$@"; }
 function string#match { [[ $1 =~ $2 ]]; }
 function string#split {
@@ -854,12 +854,28 @@ function ihep/sub:search {
 
 #------------------------------------------------------------------------------
 
+function ihep/sub:help {
+  local sub
+  for sub in $(compgen -A function -- ihep/sub: | sed -n 's.^ihep/sub:..p'); do
+    if is-function "ihep/sub:$sub/help"; then
+      "ihep/sub:$sub/help"
+    else
+      print "ihep $sub"
+    fi
+  done
+}
+
+function ihep/sub:access-log {
+  local fname_access=$_ihep_base_state/access_log.md
+  ihep/util/open "$fname_access"
+}
+
 function ihep/sub:eval {
   builtin eval -- "$1"
 }
 
 function main {
-  if declare -F "ihep/sub:$1" &>/dev/null; then
+  if is-function "ihep/sub:$1"; then
     "ihep/sub:$@"
   else
     if (($#)); then
