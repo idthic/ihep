@@ -855,14 +855,21 @@ function ihep/sub:search {
 #------------------------------------------------------------------------------
 
 function ihep/sub:help {
-  local sub
-  for sub in $(compgen -A function -- ihep/sub: | sed -n 's.^ihep/sub:..p'); do
-    if is-function "ihep/sub:$sub/help"; then
-      "ihep/sub:$sub/help"
-    else
-      print "ihep $sub"
-    fi
-  done
+  case ${1-} in
+  (list-subcommand)
+    compgen -A function -- ihep/sub: | sed -n 's.^ihep/sub:..p' ;;
+  (list-texkey)
+    sed 's/.*//' "$_ihep_base_data/literature.metadata.txt" ;;
+  (*)
+    local sub
+    for sub in $(compgen -A function -- ihep/sub: | sed -n 's.^ihep/sub:..p'); do
+      if is-function "ihep/sub:$sub/help"; then
+        "ihep/sub:$sub/help"
+      else
+        print "ihep $sub"
+      fi
+    done ;;
+  esac
 }
 
 function ihep/sub:access-log {
