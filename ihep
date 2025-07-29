@@ -208,6 +208,11 @@ function mkfd {
   fi
 }
 
+wget_version=1
+if [[ $(wget --version | awk 'NR == 1 && $2 == "Wget2"') ]]; then
+  wget_version=2
+fi
+
 function dl {
   local url=$1 dst=$2
   local referer=
@@ -215,13 +220,21 @@ function dl {
     mkfd "$_ihep_cookies"
     >> "$_ihep_cookies"
   fi
-  wget \
-    --no-verbose --show-progress \
-    --user-agent="$_ihep_user_agent" ${referer:+--referer="$REFERER"} \
-    ${_ihep_cookies:+--load-cookies "$_ihep_cookies" --save-cookies "$_ihep_cookies" --keep-session-cookies} \
-    -4 --retry-on-http-error=522,524 -t 5 \
-    "$url" -O "$dst.part" &&
-    mv "$dst.part" "$dst"
+
+  local -a wget_options
+  wget_options=(
+    --no-verbose
+    --user-agent="$_ihep_user_agent" ${referer:+--referer="$REFERER"}
+    ${_ihep_cookies:+--load-cookies "$_ihep_cookies" --save-cookies "$_ihep_cookies" --keep-session-cookies}
+    -4 --retry-on-http-error=522,524 -t 5
+  )
+  if ((wget_version >= 2)); then
+    array#push wget_options --force-progress
+  else
+    array#push wget_options --show-progress
+  fi
+
+  wget "${wget_options[@]}" "$url" -O "$dst.part" && mv "$dst.part" "$dst"
 }
 
 function ihep/util/date {
@@ -581,6 +594,19 @@ function ihep/sub:abstract {
 }
 function ihep/sub:header {
   ihep/metadata/print-header "$1"
+}
+
+function ihep/sub:bibtex {
+  local REPLY
+  ihep/metadata/load "$1" || return 1
+
+  local texkey=${REPLY[0]}
+  local inspire=${REPLY[1]}
+  local title=${REPLY[4]}
+  local authors=${REPLY[5]}
+
+  local q='https://inspirehep.net/api/literature/'$inspire'?format=bibtex'
+  curl "$q"
 }
 
 ## @fn ihep/metadata/append-header file texkey opts
